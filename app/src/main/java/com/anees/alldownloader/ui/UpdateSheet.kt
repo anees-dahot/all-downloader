@@ -26,7 +26,10 @@ import com.anees.alldownloader.ui.components.Gap
 import com.anees.alldownloader.ui.components.HGap
 import com.anees.alldownloader.ui.components.Tag
 import com.anees.alldownloader.ui.components.fmtBytes
-import com.anees.alldownloader.ui.theme.Eyebrow
+import com.anees.alldownloader.ui.theme.TextStyles
+import com.anees.alldownloader.ui.components.PillButton
+import com.anees.alldownloader.ui.components.ProgressBar
+import com.anees.alldownloader.ui.components.TextAction
 import com.anees.alldownloader.update.Release
 import com.anees.alldownloader.update.UpdateState
 import java.io.File
@@ -47,44 +50,45 @@ fun UpdateSheet(
         is UpdateState.Ready -> state.release
         else -> return
     }
+    val c = com.anees.alldownloader.ui.theme.AppTheme.c
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = c.card,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
     ) {
         Column(Modifier.padding(horizontal = 24.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
-            Text("UPDATE AVAILABLE", style = Eyebrow, color = MaterialTheme.colorScheme.primary)
-            Gap(6.dp)
-            Text("Version ${rel.version}", style = MaterialTheme.typography.headlineSmall)
-            Gap(6.dp)
-            Row { Tag("NOW ${BuildConfig.VERSION_NAME}"); HGap(6.dp); Tag(fmtBytes(rel.sizeBytes).uppercase()) }
+            Text("New Version", style = TextStyles.footnote.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = c.accent)
+            Gap(4.dp)
+            Text("All Downloader ${rel.version}", style = TextStyles.title2, color = c.label)
+            Gap(8.dp)
+            Row { Tag("You have ${BuildConfig.VERSION_NAME}"); HGap(6.dp); Tag(fmtBytes(rel.sizeBytes)) }
             if (rel.notes.isNotBlank()) {
                 Gap(16.dp)
                 Text(
                     rel.notes.replace(Regex("(?m)^#+\\s*"), "").replace("**", ""),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = TextStyles.subhead, color = c.secondary,
                     modifier = Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
                 )
             }
-            Gap(20.dp)
+            Gap(22.dp)
             when (state) {
                 is UpdateState.Downloading -> {
-                    LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth(), strokeCap = StrokeCap.Butt, gapSize = 0.dp, drawStopIndicator = {})
+                    ProgressBar(state.progress)
                     Gap(8.dp)
-                    Row {
-                        Text("Downloading ${(state.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onCancel) { Text("Cancel") }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Downloading ${(state.progress * 100).toInt()}%", style = TextStyles.numeric, color = c.secondary, modifier = Modifier.weight(1f))
+                        TextAction("Cancel", onCancel)
                     }
                 }
-                is UpdateState.Ready -> Button(onClick = { onInstall(state.file) }, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) { Text("Install now") }
+                is UpdateState.Ready -> PillButton("Install Now", { onInstall(state.file) }, Modifier.fillMaxWidth())
                 else -> {
-                    Button(onClick = { onDownload(rel) }, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) { Text("Download update") }
-                    Gap(8.dp)
+                    PillButton("Download Update", { onDownload(rel) }, Modifier.fillMaxWidth())
+                    Gap(10.dp)
                     Row {
-                        OutlinedButton(onClick = onDismiss, Modifier.weight(1f), shape = MaterialTheme.shapes.large) { Text("Later") }
-                        HGap(8.dp)
-                        OutlinedButton(onClick = { onSkip(rel) }, Modifier.weight(1f), shape = MaterialTheme.shapes.large) { Text("Skip version") }
+                        PillButton("Later", onDismiss, Modifier.weight(1f), container = c.fill, content = c.label, height = 46.dp)
+                        HGap(10.dp)
+                        PillButton("Skip Version", { onSkip(rel) }, Modifier.weight(1f), container = c.fill, content = c.label, height = 46.dp)
                     }
                 }
             }

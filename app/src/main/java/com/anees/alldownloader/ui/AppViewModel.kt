@@ -50,6 +50,12 @@ data class HomeState(
     val quality: Quality = Settings.current.defaultQuality,
     /** Selected playlist entry ids. */
     val selected: Set<String> = emptySet(),
+    /** More than one link pasted: offer to queue them all. */
+    val batch: List<String> = emptyList(),
+    /** Clip: download only [clipStart, clipEnd] seconds. */
+    val clipOn: Boolean = false,
+    val clipStart: Int = 0,
+    val clipEnd: Int = 0,
 )
 
 data class ActiveItem(
@@ -61,7 +67,8 @@ data class ActiveItem(
     val waitingForNetwork: Boolean,
 )
 
-data class LibraryFilter(val query: String = "", val kind: Kind? = null)
+enum class LibrarySort(val label: String) { NEWEST("Newest"), OLDEST("Oldest"), LARGEST("Largest"), NAME("Name") }
+data class LibraryFilter(val query: String = "", val kind: Kind? = null, val sort: LibrarySort = LibrarySort.NEWEST)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -99,6 +106,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 progress = if (running) w!!.progress.getFloat(DownloadWorker.KEY_PROGRESS, -1f) else -1f,
                 status = when {
                     rec.status == Status.FAILED -> rec.error ?: "Failed"
+                    rec.status == Status.PAUSED -> "Paused"
                     running -> w!!.progress.getString(DownloadWorker.KEY_STATUS) ?: "Starting…"
                     (w?.runAttemptCount ?: 0) > 0 -> rec.error?.substringBefore(" · ")?.let { "$it · retrying shortly" } ?: "Retrying shortly"
                     else -> "Waiting in queue"
@@ -119,7 +127,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         recs.asSequence().filter { it.status == Status.DONE }
             .filter { f.kind == null || it.kind == f.kind }
             .filter { f.query.isBlank() || it.title.contains(f.query, true) || it.site.contains(f.query, true) || (it.uploader?.contains(f.query, true) == true) }
-            .sortedByDescending { it.finishedAt }
+            .let { seq ->
+                when (f.sort) {
+                    LibrarySort.NEWEST -> seq.sortedByDescending { it.finishedAt }
+                    LibrarySort.OLDEST -> seq.sortedBy { it.finishedAt }
+                    LibrarySort.LARGEST -> seq.sortedByDescending { it.sizeBytes }
+                    LibrarySort.NAME -> seq.sortedBy { it.title.lowercase() }
+                }
+            }
             .toList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -128,12 +143,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- Home ----------
-    fun setUrl(url: String) = _home.update { it.copy(url = url, error = null) }
+    fun setUrl(url: String) = _home.update {
+        val links = URL_RE.findAll(url).map { m -> m.value.trimEnd('.', ',', ')', ']') }.distinct().toList()
+        it.copy(url = url, error = null, batch = if (links.size > 1) links else emptyList())
+    }
+    fun setClip(on: Boolean, start: Int, end: Int) = _home.update { it.copy(clipOn = on, clipStart = start, clipEnd = end) }
     fun setQuality(q: Quality) = _home.update { it.copy(quality = q) }
     fun clearHome() { fetchJob?.cancel(); _home.value = HomeState() }
 
     /** Pull first URL out of shared or pasted text. */
     fun onShared(text: String, autoFetch: Boolean = true) {
+        val all = URL_RE.findAll(text).map { it.value.trimEnd('.', ',', ')', ']') }.distinct().toList()
+        if (all.size > 1) { setUrl(text.trim()); return }
         val url = URL_RE.find(text)?.value?.trimEnd('.', ',', ')', ']') ?: run {
             _home.update { it.copy(url = text.trim(), error = "No link found in that text") }; return
         }
@@ -170,7 +191,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             info.heights.any { it == s.quality.height } -> s.quality
                             else -> Quality.BEST
                         }
-                        s.copy(loading = false, info = info, quality = q, selected = info.entries.map { it.id }.toSet())
+                        s.copy(loading = false, info = info, quality = q, selected = info.entries.map { it.id }.toSet(),
+                            clipOn = false, clipStart = 0, clipEnd = info.durationSec)
                     }
                 }
                 .onFailure { t ->
@@ -199,14 +221,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _messages.tryEmit("${picks.size} items added · ${Settings.current.parallel} at a time")
             return
         }
+        val section = if (s.clipOn && !info.isDirect && s.clipEnd > s.clipStart &&
+            (s.clipStart > 0 || s.clipEnd < info.durationSec)) "${s.clipStart}-${s.clipEnd}" else null
         val rec = DownloadRecord(
             id = UUID.randomUUID().toString(), url = info.url, title = info.title, thumb = info.thumbnail,
-            site = info.site, uploader = info.uploader, durationSec = info.durationSec, quality = quality,
-            status = Status.QUEUED, createdAt = System.currentTimeMillis(),
+            site = info.site, uploader = info.uploader,
+            durationSec = if (section != null) s.clipEnd - s.clipStart else info.durationSec, quality = quality,
+            status = Status.QUEUED, createdAt = System.currentTimeMillis(), section = section,
         )
         start(rec, info.isDirect)
         _home.value = HomeState()
         _messages.tryEmit("Added to downloads")
+    }
+
+    /** Queue every pasted link with the default quality; titles fill in when each finishes. */
+    fun enqueueBatch() {
+        val links = _home.value.batch.ifEmpty { return }
+        val base = System.currentTimeMillis()
+        links.forEachIndexed { i, u -> quickStart(u, Settings.current.defaultQuality, base + i) }
+        _home.value = HomeState()
+        _messages.tryEmit("${links.size} links added")
+    }
+
+    /** Start without reading info first (share → instant, batch). */
+    fun quickStart(url: String, quality: Quality, at: Long = System.currentTimeMillis()) {
+        val host = runCatching { java.net.URI(url).host.removePrefix("www.").removePrefix("m.") }.getOrNull().orEmpty()
+        start(DownloadRecord(
+            id = UUID.randomUUID().toString(), url = url, title = url, thumb = null,
+            site = host.substringBeforeLast('.').replaceFirstChar { it.uppercase() }, uploader = null, durationSec = 0,
+            quality = quality, status = Status.QUEUED, createdAt = at,
+        ), FILE_RE.containsMatchIn(url))
     }
 
     private fun start(rec: DownloadRecord, isDirect: Boolean) {
@@ -220,6 +264,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     DownloadWorker.KEY_TITLE to rec.title,
                     DownloadWorker.KEY_QUALITY to rec.quality.name,
                     DownloadWorker.KEY_DIRECT to isDirect,
+                    DownloadWorker.KEY_SECTION to rec.section,
                 )
             )
             .setConstraints(Constraints(requiredNetworkType = net))
@@ -237,9 +282,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         HistoryStore.modify(rec.id) { it.copy(status = Status.CANCELLED) }
     }
 
+    fun pause(rec: DownloadRecord) {
+        HistoryStore.modify(rec.id) { it.copy(status = Status.PAUSED) }
+        wm.cancelAllWorkByTag(TAG_REC + rec.id)
+    }
+
+    /** Same record id → same temp dir → yt-dlp --continue picks up the partial file. */
+    fun resume(rec: DownloadRecord) {
+        wm.cancelAllWorkByTag(TAG_REC + rec.id)
+        start(rec.copy(status = Status.QUEUED, error = null), isDirectRec(rec))
+    }
+
+    fun pauseAll() = active.value.filter { it.rec.status.isActive }.forEach { pause(it.rec) }
+    fun resumeAll() = active.value.filter { it.rec.status == Status.PAUSED }.forEach { resume(it.rec) }
+
+    private fun isDirectRec(rec: DownloadRecord) = rec.site.equals("Generic", true) || FILE_RE.containsMatchIn(rec.url)
+
     fun retry(rec: DownloadRecord) {
         wm.cancelAllWorkByTag(TAG_REC + rec.id)
-        start(rec.copy(status = Status.QUEUED, error = null, createdAt = System.currentTimeMillis()), rec.site.equals("Generic", true))
+        start(rec.copy(status = Status.QUEUED, error = null, createdAt = System.currentTimeMillis()), isDirectRec(rec))
     }
 
     fun dismiss(rec: DownloadRecord) = HistoryStore.remove(listOf(rec.id))
@@ -247,7 +308,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun redownload(rec: DownloadRecord) {
         start(rec.copy(id = UUID.randomUUID().toString(), status = Status.QUEUED, createdAt = System.currentTimeMillis(),
-            outUri = null, outName = null, mime = null, sizeBytes = 0, finishedAt = 0, error = null), rec.site.equals("Generic", true))
+            outUri = null, outName = null, mime = null, sizeBytes = 0, finishedAt = 0, error = null), isDirectRec(rec))
         _messages.tryEmit("Downloading again")
     }
 
@@ -268,17 +329,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         catch (_: Exception) { _messages.tryEmit("Couldn't open file") }
     }
 
+    fun shareMany(recs: List<DownloadRecord>) {
+        if (recs.size == 1) return share(recs[0])
+        val uris = recs.mapNotNull { r -> r.outUri?.let { runCatching { Storage.shareable(ctx, it) }.getOrNull() } }
+        if (uris.isEmpty()) return
+        val i = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "*/*"
+            putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { ctx.startActivity(android.content.Intent.createChooser(i, null).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { _messages.tryEmit("Couldn't share files") }
+    }
+
     fun share(rec: DownloadRecord) {
         val ref = rec.outUri ?: return
         runCatching { ctx.startActivity(Storage.shareIntent(ctx, ref, rec.mime)) }
             .onFailure { _messages.tryEmit("Couldn't share file") }
     }
 
-    fun removeFromLibrary(rec: DownloadRecord, deleteFile: Boolean) = viewModelScope.launch {
-        if (deleteFile && rec.outUri != null) withContext(Dispatchers.IO) { Storage.delete(ctx, rec.outUri) }
-        HistoryStore.remove(listOf(rec.id))
-        _messages.tryEmit(if (deleteFile) "File deleted" else "Removed from library")
+    fun removeFromLibrary(rec: DownloadRecord, deleteFile: Boolean) = removeMany(listOf(rec), deleteFile)
+
+    fun removeMany(recs: List<DownloadRecord>, deleteFile: Boolean) = viewModelScope.launch {
+        if (deleteFile) withContext(Dispatchers.IO) { recs.forEach { r -> r.outUri?.let { Storage.delete(ctx, it) } } }
+        HistoryStore.remove(recs.map { it.id })
+        val n = if (recs.size == 1) "" else "${recs.size} "
+        _messages.tryEmit(if (deleteFile) "${n}File${if (recs.size == 1) "" else "s"} deleted" else "Removed from library")
     }
+
+    fun setSort(s: LibrarySort) = _filter.update { it.copy(sort = s) }
+
+    // ---------- Clipboard ----------
+    private val _clipOffer = MutableStateFlow<String?>(null)
+    val clipOffer = _clipOffer.asStateFlow()
+
+    fun onClipboard(text: String?) {
+        if (!Settings.current.clipboardDetect || text == null) return
+        val url = URL_RE.find(text)?.value?.trimEnd('.', ',', ')', ']') ?: return
+        if (url == Settings.lastClipOffered || url == _home.value.url.trim()) return
+        _clipOffer.value = url
+    }
+    fun dismissClip() { Settings.lastClipOffered = _clipOffer.value; _clipOffer.value = null }
+    fun useClip() { val u = _clipOffer.value ?: return; dismissClip(); onShared(u) }
 
     // ---------- Settings / engine / updates ----------
     fun updateEngine() = viewModelScope.launch { _messages.emit(Engine.update()) }
@@ -299,5 +391,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG_REC = "rec:"
         val URL_RE = Regex("""https?://[^\s]+""")
+        private val FILE_RE = Regex("""\.(zip|apk|pdf|rar|7z|exe|dmg|iso|tar|gz|mp4|mkv|mp3|m4a|flac|jpg|png)(\?|$)""", RegexOption.IGNORE_CASE)
     }
 }

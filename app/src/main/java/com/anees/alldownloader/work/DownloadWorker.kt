@@ -44,7 +44,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         // Keyed by record, not by work id, so a retry resumes the .part files.
         val tmp = File(applicationContext.cacheDir, "dl/$recId").apply { mkdirs() }
         val order = HistoryStore.get(recId)?.createdAt ?: 0L
-        if (HistoryStore.get(recId)?.status == Status.CANCELLED) return Result.success()
+        HistoryStore.get(recId)?.status?.let { if (it == Status.CANCELLED || it == Status.PAUSED) return Result.success() }
 
         setProgress(progressData(-1f, if (runAttemptCount > 0) "Retrying…" else "Waiting in queue", null, null))
         var acquired = false
@@ -59,7 +59,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 // If WorkManager cancels us, kill the yt-dlp process so the blocking call returns.
                 val killer = launch { try { awaitCancellation() } finally { YtDlpRepository.cancel(processId) } }
                 withContext(Dispatchers.IO) {
-                    YtDlpRepository.download(url, quality, isDirect, tmp, processId, ::onProgress)
+                    YtDlpRepository.download(url, quality, isDirect, tmp, processId, inputData.getString(KEY_SECTION), ::onProgress)
                 }
                 killer.cancel()
             }
@@ -73,6 +73,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             HistoryStore.modify(recId) {
                 it.copy(
+                    title = if (it.title == it.url) name.substringBeforeLast('.').replace(Regex(" \\[[^]]+]$"), "") else it.title,
                     status = Status.DONE, finishedAt = System.currentTimeMillis(), error = null,
                     outUri = saved.first, outName = name, mime = Storage.mimeOf(name), sizeBytes = saved.second,
                 )
@@ -81,9 +82,15 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             Result.success(workDataOf(KEY_REC_ID to recId))
         } catch (t: Throwable) {
             if (isStopped) {
-                // User cancel -> VM already marked CANCELLED. System stop -> WorkManager reschedules; keep partials.
-                keepTmp = HistoryStore.get(recId)?.status != Status.CANCELLED
-                if (keepTmp) HistoryStore.modify(recId) { it.copy(status = Status.QUEUED) }
+                // User cancel -> VM already marked CANCELLED. Pause -> keep partials, keep PAUSED.
+                // System stop -> WorkManager reschedules; keep partials.
+                if (stopReason == androidx.work.WorkInfo.STOP_REASON_CANCELLED_BY_APP && HistoryStore.get(recId)?.status?.isActive == true) {
+                    // Cancelled from the notification.
+                    HistoryStore.modify(recId) { it.copy(status = Status.CANCELLED) }
+                }
+                val st = HistoryStore.get(recId)?.status
+                keepTmp = st != Status.CANCELLED
+                if (st != Status.CANCELLED && st != Status.PAUSED) HistoryStore.modify(recId) { it.copy(status = Status.QUEUED) }
                 return Result.failure()
             }
             android.util.Log.w("DownloadWorker", "download failed: ${t.message}")
@@ -104,6 +111,10 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     }
 
     private fun onProgress(p: Float, eta: Long, line: String) {
+        if (line.startsWith("[download] Destination:")) {
+            val name = line.substringAfterLast('/').substringBeforeLast('.').replace(Regex(" \\[[^]]+]$"), "")
+            if (name.isNotBlank()) HistoryStore.get(recId)?.takeIf { it.title == it.url }?.let { HistoryStore.modify(recId) { r -> r.copy(title = name) } }
+        }
         val now = System.currentTimeMillis()
         if (now - lastPushMs < 400) return
         lastPushMs = now
@@ -142,6 +153,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setProgress(100, p.coerceAtLeast(0f).toInt(), p < 0)
+            .addAction(0, "Cancel", androidx.work.WorkManager.getInstance(applicationContext).createCancelPendingIntent(id))
             .build()
         return if (Build.VERSION.SDK_INT >= 29) ForegroundInfo(notifId, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else ForegroundInfo(notifId, n)
@@ -171,6 +183,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         const val KEY_TITLE = "title"
         const val KEY_QUALITY = "quality"
         const val KEY_DIRECT = "direct"
+        const val KEY_SECTION = "section"
         const val KEY_PROGRESS = "progress"
         const val KEY_STATUS = "status"
         const val KEY_SPEED = "speed"

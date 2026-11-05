@@ -91,17 +91,19 @@ object YtDlpRepository {
         isDirect: Boolean,
         outDir: File,
         processId: String,
+        section: String? = null,
         onProgress: (percent: Float, etaSec: Long, line: String) -> Unit,
     ) {
         val s = Settings.current
-        withBotFallback { fallback -> runDownload(url, quality, isDirect, outDir, processId, s, fallback, onProgress) }
+        withBotFallback { fallback -> runDownload(url, quality, isDirect, outDir, processId, s, fallback, section, onProgress) }
     }
 
     private fun runDownload(
         url: String, quality: Quality, isDirect: Boolean, outDir: File, processId: String,
-        s: AppSettings, fallback: Boolean, onProgress: (Float, Long, String) -> Unit,
+        s: AppSettings, fallback: Boolean, section: String?, onProgress: (Float, Long, String) -> Unit,
     ) {
         val req = YoutubeDLRequest(url).apply {
+            if (section != null && !isDirect) addOption("--download-sections", "*$section")
             if (fallback) addOption("--extractor-args", FALLBACK_ARGS)
             addOption("--no-playlist")
             addOption("--no-mtime")

@@ -19,8 +19,8 @@ android {
         applicationId = "com.anees.alldownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.0.0"
+        versionCode = 11
+        versionName = "1.1.0"
         buildConfigField("String", "GITHUB_REPO", "\"anees-dahot/all-downloader\"")
     }
 
@@ -80,6 +80,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation("androidx.work:work-runtime-ktx:2.10.3")
     implementation("androidx.core:core-ktx:1.16.0")
+    implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

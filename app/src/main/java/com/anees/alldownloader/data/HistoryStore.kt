@@ -53,7 +53,7 @@ object HistoryStore {
                 put("thumb", r.thumb); put("site", r.site); put("uploader", r.uploader)
                 put("dur", r.durationSec); put("q", r.quality.name); put("st", r.status.name)
                 put("at", r.createdAt); put("fin", r.finishedAt); put("uri", r.outUri)
-                put("name", r.outName); put("mime", r.mime); put("size", r.sizeBytes); put("err", r.error)
+                put("name", r.outName); put("mime", r.mime); put("size", r.sizeBytes); put("err", r.error); put("sec", r.section)
             })
         }
     }.toString()
@@ -79,6 +79,7 @@ object HistoryStore {
                 mime = o.str("mime"),
                 sizeBytes = o.optLong("size"),
                 error = o.str("err"),
+                section = o.str("sec"),
             )
         }
     }

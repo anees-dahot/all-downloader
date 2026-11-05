@@ -37,7 +37,9 @@ enum class Quality(val label: String, val height: Int?, val audio: String? = nul
     P480("480p", 480),
     P360("360p", 360),
     MP3("MP3", null, "mp3"),
-    M4A("M4A", null, "m4a");
+    M4A("M4A", null, "m4a"),
+    OPUS("Opus", null, "opus"),
+    FLAC("FLAC", null, "flac");
 
     val isAudio get() = audio != null
 
@@ -48,7 +50,7 @@ enum class Quality(val label: String, val height: Int?, val audio: String? = nul
     }
 }
 
-enum class Status { QUEUED, RUNNING, DONE, FAILED, CANCELLED;
+enum class Status { QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELLED;
     val isActive get() = this == QUEUED || this == RUNNING
 }
 
@@ -69,6 +71,8 @@ data class DownloadRecord(
     val mime: String? = null,
     val sizeBytes: Long = 0,
     val error: String? = null,
+    /** Clip range in seconds, "start-end"; null = whole thing. */
+    val section: String? = null,
 ) {
     val kind: Kind get() = when {
         mime?.startsWith("video") == true -> Kind.VIDEO
