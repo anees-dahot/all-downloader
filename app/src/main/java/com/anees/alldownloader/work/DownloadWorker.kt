@@ -180,6 +180,12 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             .setContentIntent(open ?: contentIntent(if (ok) 2 else 1))
             .setAutoCancel(true)
             .apply {
+                if (ok && rec?.outUri != null) runCatching {
+                    addAction(0, "Share", PendingIntent.getActivity(
+                        applicationContext, notifId + 2, Storage.shareIntent(applicationContext, rec.outUri, rec.mime),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ))
+                }
                 if (!ok) addAction(0, "Retry", PendingIntent.getActivity(
                     applicationContext, notifId,
                     Intent(applicationContext, MainActivity::class.java).putExtra(MainActivity.EXTRA_RETRY, recId)

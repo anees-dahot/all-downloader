@@ -21,6 +21,12 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -93,16 +99,16 @@ fun DownloadsScreen(items: List<ActiveItem>, wifiOnly: Boolean, a: QueueActions,
                 PillButton("Grab a Link", a.onGoHome, height = 44.dp)
             }
         }
-        group("Downloading", running) { i, it, last -> ActiveRow(it, last, { h.tap(); a.onPause(it) }, { h.reject(); a.onCancel(it) }) }
-        group("Paused", paused) { i, it, last -> ActiveRow(it, last, { h.tap(); a.onResume(it) }, { h.reject(); a.onCancel(it) }) }
-        group("Failed", failed, trailing = { TextAction("Clear", { h.tap(); a.onClearFailed() }, color = c.red) }) { i, it, last ->
+        group("Downloading", running, swipe = "Cancel" to { it -> h.reject(); a.onCancel(it) }) { i, it, last -> ActiveRow(it, last, { h.tap(); a.onPause(it) }, { h.reject(); a.onCancel(it) }) }
+        group("Paused", paused, swipe = "Cancel" to { it -> h.reject(); a.onCancel(it) }) { i, it, last -> ActiveRow(it, last, { h.tap(); a.onResume(it) }, { h.reject(); a.onCancel(it) }) }
+        group("Failed", failed, swipe = "Dismiss" to { it -> h.tap(); a.onDismiss(it) }, trailing = { TextAction("Clear", { h.tap(); a.onClearFailed() }, color = c.red) }) { i, it, last ->
             FailedRow(it, last, { h.confirm(); a.onRetry(it) }, { a.onDismiss(it) })
         }
     }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.group(
-    title: String, list: List<ActiveItem>, trailing: (@Composable () -> Unit)? = null,
+    title: String, list: List<ActiveItem>, swipe: Pair<String, (ActiveItem) -> Unit>, trailing: (@Composable () -> Unit)? = null,
     row: @Composable LazyItemScope.(Int, ActiveItem, Boolean) -> Unit,
 ) {
     if (list.isEmpty()) return
@@ -115,8 +121,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.group(
     itemsIndexed(list, key = { _, it -> it.rec.id }) { i, it ->
         val first = i == 0; val last = i == list.lastIndex
         val shape = RoundedCornerShape(topStart = if (first) 14.dp else 0.dp, topEnd = if (first) 14.dp else 0.dp, bottomStart = if (last) 14.dp else 0.dp, bottomEnd = if (last) 14.dp else 0.dp)
-        Box(Modifier.animateItem(placementSpec = Motion.default()).padding(horizontal = 16.dp).clip(shape).background(AppTheme.c.card)) {
-            row(i, it, last)
+        Box(Modifier.animateItem(placementSpec = Motion.default()).padding(horizontal = 16.dp).clip(shape)) {
+            SwipeRow(swipe.first, { swipe.second(it) }) {
+                Box(Modifier.background(AppTheme.c.card)) { row(i, it, last) }
+            }
         }
     }
 }
@@ -180,4 +188,23 @@ private fun FailedRow(item: ActiveItem, last: Boolean, onRetry: () -> Unit, onDi
         }
         if (!last) Separator(98.dp)
     }
+}
+
+/** Swipe left to reveal a red action, Mail-style. Full swipe commits it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeRow(label: String, onSwiped: () -> Unit, content: @Composable () -> Unit) {
+    val c = AppTheme.c
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { v -> if (v == SwipeToDismissBoxValue.EndToStart) { onSwiped(); true } else false },
+        positionalThreshold = { it * 0.4f },
+    )
+    SwipeToDismissBox(
+        state, enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(Modifier.fillMaxSize().background(c.red).padding(end = 22.dp), contentAlignment = Alignment.CenterEnd) {
+                Text(label, style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+            }
+        },
+    ) { content() }
 }

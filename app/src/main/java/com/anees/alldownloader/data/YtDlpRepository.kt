@@ -180,7 +180,8 @@ object YtDlpRepository {
     }
 
     /** Errors where trying again won't help. */
-    fun isPermanent(msg: String) = listOf("isn't supported", "private", "404", "sign-in", "No output file", "copyright", "removed", "unavailable")
+    fun isPermanent(msg: String) = listOf("isn't supported", "private", "404", "sign-in", "No output file", "copyright", "removed", "unavailable",
+        "quality isn't offered", "age-restricted", "your region", "storage is full", "hasn't started")
         .any { msg.contains(it, true) }
 
     private fun friendly(msg: String): String = when {
@@ -193,6 +194,15 @@ object YtDlpRepository {
         msg.contains("429", true) || msg.contains("Too Many Requests", true) ->
             "The site is rate-limiting this network (429). Wait a few minutes and retry."
         msg.contains("HTTP Error 404", true) -> "Nothing found at this link (404)."
+        msg.contains("Requested format is not available", true) -> "That quality isn't offered for this one. Pick Best and retry."
+        msg.contains("confirm your age", true) || msg.contains("age-restricted", true) || msg.contains("age restricted", true) ->
+            "This is age-restricted and needs a signed-in account."
+        msg.contains("not available in your country", true) || msg.contains("geo restrict", true) || msg.contains("geo-restrict", true) ->
+            "Not available in your region."
+        msg.contains("live event will begin", true) || msg.contains("Premieres in", true) -> "This stream hasn't started yet."
+        msg.contains("No space left", true) || msg.contains("ENOSPC", true) -> "Phone storage is full. Free up space and retry."
+        msg.contains("timed out", true) -> "The connection timed out. Retry on a steadier network."
+        msg.contains("members-only", true) || msg.contains("Join this channel", true) -> "Members-only content needs a signed-in account."
         else -> msg.replace(Regex("^\\[[^]]+] [^:]+: "), "")
     }
 }
