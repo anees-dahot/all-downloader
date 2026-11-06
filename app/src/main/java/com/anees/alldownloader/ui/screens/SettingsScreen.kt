@@ -44,6 +44,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.automirrored.rounded.Login
 import com.anees.alldownloader.ui.components.fmtBytes
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.rounded.Delete
@@ -164,6 +167,30 @@ fun SettingsScreen(
                 Separator(SEP)
                 Toggle("Skip Sponsors", Icons.Rounded.ContentCut, c.red, s.sponsorBlock) { v -> onChange { it.copy(sponsorBlock = v) } }
             }
+            Gap(28.dp)
+        }
+        item(key = "accounts") {
+            val sites by com.anees.alldownloader.data.Cookies.sites.collectAsStateWithLifecycle()
+            var confirmForget by remember { mutableStateOf(false) }
+            Section("Accounts", footer = "Sign in to a site so age-restricted, members-only or \"confirm you're not a bot\" videos download. Cookies stay on this phone.") {
+                Cell(
+                    "Site Sign-In", icon = Icons.AutoMirrored.Rounded.Login, iconColor = c.green, chevron = true,
+                    value = when (sites.size) { 0 -> "None"; 1 -> sites[0]; else -> "${sites.size} sites" },
+                    onClick = { ctx.startActivity(Intent(ctx, com.anees.alldownloader.SignInActivity::class.java)) },
+                )
+                if (sites.isNotEmpty()) {
+                    Separator(SEP)
+                    Cell("Forget All Sign-Ins", icon = Icons.AutoMirrored.Rounded.Logout, iconColor = c.red, titleColor = c.red, onClick = { confirmForget = true })
+                }
+            }
+            if (confirmForget) androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmForget = false }, containerColor = c.card,
+                shape = RoundedCornerShape(22.dp),
+                title = { Text("Forget All Sign-Ins?", style = TextStyles.headline) },
+                text = { Text("Removes saved cookies for ${sites.joinToString()}. You can sign in again any time.", style = TextStyles.subhead) },
+                confirmButton = { androidx.compose.material3.TextButton({ com.anees.alldownloader.data.Cookies.clearAll(); confirmForget = false }) { Text("Forget", color = c.red) } },
+                dismissButton = { androidx.compose.material3.TextButton({ confirmForget = false }) { Text("Cancel", color = c.accent) } },
+            )
             Gap(28.dp)
         }
         item(key = "engine") {

@@ -20,6 +20,7 @@ object YtDlpRepository {
             YoutubeDL.getInstance().getInfo(YoutubeDLRequest(url).apply {
                 addOption("--no-playlist")
                 if (fallback) addOption("--extractor-args", FALLBACK_ARGS)
+                withCookies()
             })
         }
         val formats = info.formats.orEmpty()
@@ -56,6 +57,7 @@ object YtDlpRepository {
     private fun fetchPlaylist(url: String): MediaInfo? {
         val req = YoutubeDLRequest(url).apply {
             addOption("--flat-playlist"); addOption("--yes-playlist"); addOption("-J")
+            withCookies()
         }
         val o = org.json.JSONObject(YoutubeDL.getInstance().execute(req).out)
         if (o.optString("_type") != "playlist") return null
@@ -109,6 +111,7 @@ object YtDlpRepository {
             if (fallback) addOption("--extractor-args", FALLBACK_ARGS)
             addOption("--no-playlist")
             addOption("--no-mtime")
+            withCookies()
             addOption("--newline")
             addOption("--continue")
             // Network hiccups shouldn't kill a long download.
@@ -167,6 +170,10 @@ object YtDlpRepository {
         block(true)
     }
 
+    private fun YoutubeDLRequest.withCookies() {
+        Cookies.fileForYtDlp()?.let { addOption("--cookies", it.absolutePath) }
+    }
+
     fun cancel(processId: String) {
         runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
     }
@@ -189,20 +196,20 @@ object YtDlpRepository {
         msg.contains("Unable to resolve host", true) || msg.contains("Failed to resolve", true) ||
             msg.contains("getaddrinfo", true) -> "No internet connection."
         msg.contains("Private video", true) -> "This video is private."
-        msg.contains("Sign in to confirm", true) -> "The site wants a sign-in to show this. Try again later or update the engine in Settings."
+        msg.contains("Sign in to confirm", true) -> "The site wants a sign-in. Sign in under Settings → Site Sign-In, then retry."
         msg.contains("HTTP Error 403", true) -> "The site refused the request (403). Updating the engine in Settings often fixes this."
         msg.contains("429", true) || msg.contains("Too Many Requests", true) ->
             "The site is rate-limiting this network (429). Wait a few minutes and retry."
         msg.contains("HTTP Error 404", true) -> "Nothing found at this link (404)."
         msg.contains("Requested format is not available", true) -> "That quality isn't offered for this one. Pick Best and retry."
         msg.contains("confirm your age", true) || msg.contains("age-restricted", true) || msg.contains("age restricted", true) ->
-            "This is age-restricted and needs a signed-in account."
+            "Age-restricted. Sign in under Settings → Site Sign-In, then retry."
         msg.contains("not available in your country", true) || msg.contains("geo restrict", true) || msg.contains("geo-restrict", true) ->
             "Not available in your region."
         msg.contains("live event will begin", true) || msg.contains("Premieres in", true) -> "This stream hasn't started yet."
         msg.contains("No space left", true) || msg.contains("ENOSPC", true) -> "Phone storage is full. Free up space and retry."
         msg.contains("timed out", true) -> "The connection timed out. Retry on a steadier network."
-        msg.contains("members-only", true) || msg.contains("Join this channel", true) -> "Members-only content needs a signed-in account."
+        msg.contains("members-only", true) || msg.contains("Join this channel", true) -> "Members-only. Sign in under Settings → Site Sign-In, then retry."
         else -> msg.replace(Regex("^\\[[^]]+] [^:]+: "), "")
     }
 }

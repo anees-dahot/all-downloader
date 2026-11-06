@@ -60,6 +60,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".SignInActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".GrabTileService"
             android:exported="true"

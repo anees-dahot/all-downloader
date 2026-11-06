@@ -17,6 +17,7 @@ class App : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         Settings.init(this)
         HistoryStore.init(this)
+        com.anees.alldownloader.data.Cookies.init(this)
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel(CHANNEL_DOWNLOADS, "Active downloads", NotificationManager.IMPORTANCE_LOW))
