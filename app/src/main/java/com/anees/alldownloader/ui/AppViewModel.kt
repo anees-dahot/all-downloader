@@ -35,6 +35,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -144,6 +148,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { AppUpdater.takeIf { Settings.current.autoCheckApp }?.check(manual = false) }
+        // Network rule is baked into each WorkRequest, so re-enqueue jobs that haven't started yet.
+        viewModelScope.launch {
+            Settings.state.map { it.wifiOnly }.distinctUntilChanged().drop(1).collect { requeueWaiting() }
+        }
     }
 
     // ---------- Home ----------
@@ -285,6 +293,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         wm.enqueue(req)
     }
 
+    private suspend fun requeueWaiting() {
+        HistoryStore.items.value.filter { it.status == Status.QUEUED }.forEach { r ->
+            val infos = wm.getWorkInfosByTagFlow(TAG_REC + r.id).first()
+            if (infos.isNotEmpty() && infos.all { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }) {
+                wm.cancelAllWorkByTag(TAG_REC + r.id)
+                start(r, isDirectRec(r))
+            }
+        }
+    }
+
     // ---------- Downloads ----------
     fun cancel(rec: DownloadRecord) {
         wm.cancelAllWorkByTag(TAG_REC + rec.id)
@@ -316,6 +334,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun retry(rec: DownloadRecord) {
         wm.cancelAllWorkByTag(TAG_REC + rec.id)
         start(rec.copy(status = Status.QUEUED, error = null, createdAt = System.currentTimeMillis()), isDirectRec(rec))
+    }
+
+    fun retryById(id: String) {
+        val rec = HistoryStore.get(id) ?: return
+        if (rec.status == Status.FAILED) retry(rec)
     }
 
     fun dismiss(rec: DownloadRecord) { HistoryStore.remove(listOf(rec.id)); dropPartials(rec.id) }

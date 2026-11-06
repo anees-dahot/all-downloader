@@ -129,6 +129,12 @@ class MainActivity : ComponentActivity() {
         when {
             intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { vm.onShared(it); tab = 0 }
             intent.hasExtra(EXTRA_URL) -> { vm.onShared(intent.getStringExtra(EXTRA_URL)!!); tab = 0 }
+            intent.hasExtra(EXTRA_RETRY) -> {
+                val id = intent.getStringExtra(EXTRA_RETRY)!!
+                vm.retryById(id); tab = 1
+                // The failure notification used id.hashCode() + 1 (see DownloadWorker.notifyDone).
+                getSystemService(android.app.NotificationManager::class.java)?.cancel(id.hashCode() + 1)
+            }
             intent.hasExtra(EXTRA_TAB) -> tab = intent.getIntExtra(EXTRA_TAB, 0)
         }
     }
@@ -225,5 +231,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_TAB = "tab"
         const val EXTRA_URL = "url"
+        const val EXTRA_RETRY = "retry"
     }
 }

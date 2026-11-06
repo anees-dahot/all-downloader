@@ -74,6 +74,14 @@ data class DownloadRecord(
     /** Clip range in seconds, "start-end"; null = whole thing. */
     val section: String? = null,
 ) {
+    /** Quick-started jobs are titled with their URL until yt-dlp names them; show "file.bin · host" meanwhile. */
+    val displayTitle: String get() = if (title != url) title else run {
+        val u = runCatching { java.net.URI(url) }.getOrNull()
+        val host = u?.host?.removePrefix("www.").orEmpty()
+        val last = u?.path?.trimEnd('/')?.substringAfterLast('/').orEmpty()
+        listOf(last, host).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { url }
+    }
+
     val kind: Kind get() = when {
         mime?.startsWith("video") == true -> Kind.VIDEO
         mime?.startsWith("audio") == true -> Kind.AUDIO

@@ -73,7 +73,13 @@ fun DownloadsScreen(items: List<ActiveItem>, wifiOnly: Boolean, a: QueueActions,
             items.isEmpty() -> "Nothing in progress"
             running.isEmpty() && paused.isNotEmpty() -> "${paused.size} paused"
             running.isEmpty() -> "${failed.size} need attention"
-            else -> "${running.size} downloading" + if (wifiOnly) " · Wi-Fi only" else ""
+            else -> buildString {
+                append("${running.size} downloading")
+                // Average over jobs that report a percentage; queued ones would drag it to 0.
+                val known = running.map { it.progress }.filter { it >= 0f }
+                if (known.isNotEmpty()) append(" · ${(known.average()).toInt()}%")
+                if (wifiOnly) append(" · Wi-Fi only")
+            }
         },
         actions = {
             when {
@@ -124,7 +130,7 @@ private fun ActiveRow(item: ActiveItem, last: Boolean, onToggle: () -> Unit, onC
             Thumb(item.rec.thumb, fallback = if (item.rec.quality.isAudio) Icons.Rounded.MusicNote else Icons.Rounded.Movie, width = 72.dp, height = 72.dp, shape = RoundedCornerShape(10.dp))
             HGap(12.dp)
             Column(Modifier.weight(1f)) {
-                Text(item.rec.title, style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = c.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(item.rec.displayTitle, style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = c.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Gap(3.dp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Tag(item.rec.quality.short.uppercase())
@@ -161,7 +167,7 @@ private fun FailedRow(item: ActiveItem, last: Boolean, onRetry: () -> Unit, onDi
             Thumb(item.rec.thumb, fallback = if (item.rec.section != null) Icons.Rounded.ContentCut else Icons.Rounded.Movie, width = 72.dp, height = 72.dp, shape = RoundedCornerShape(10.dp))
             HGap(12.dp)
             Column(Modifier.weight(1f)) {
-                Text(item.rec.title, style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = c.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.rec.displayTitle, style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = c.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Gap(3.dp)
                 Text(item.status, style = TextStyles.footnote, color = c.red, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }

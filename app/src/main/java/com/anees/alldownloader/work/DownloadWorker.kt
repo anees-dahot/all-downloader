@@ -35,7 +35,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     private val notifId = recId.hashCode()
     private val inputTitle = inputData.getString(KEY_TITLE) ?: "Download"
     /** Quick-started jobs begin titled with their URL; prefer the real title once known. */
-    private val title get() = HistoryStore.get(recId)?.title?.takeIf { !it.startsWith("http") } ?: inputTitle
+    private val title get() = HistoryStore.get(recId)?.displayTitle ?: inputTitle
     private var lastPushMs = 0L
 
     override suspend fun doWork(): Result {
@@ -179,6 +179,14 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open ?: contentIntent(if (ok) 2 else 1))
             .setAutoCancel(true)
+            .apply {
+                if (!ok) addAction(0, "Retry", PendingIntent.getActivity(
+                    applicationContext, notifId,
+                    Intent(applicationContext, MainActivity::class.java).putExtra(MainActivity.EXTRA_RETRY, recId)
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ))
+            }
             .build()
         val nm = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         runCatching { nm.notify(notifId + 1, n) }
