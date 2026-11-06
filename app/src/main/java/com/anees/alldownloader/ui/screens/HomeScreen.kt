@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.anees.alldownloader.data.EngineState
+import com.anees.alldownloader.data.DownloadRecord
 import com.anees.alldownloader.data.MediaInfo
 import com.anees.alldownloader.data.PlaylistEntry
 import com.anees.alldownloader.data.Quality
@@ -115,6 +116,7 @@ class HomeActions(
     val onBatch: () -> Unit,
     val onUseClip: () -> Unit,
     val onDismissClip: () -> Unit,
+    val onOpenExisting: (DownloadRecord) -> Unit,
 )
 
 @Composable
@@ -383,6 +385,23 @@ private fun PreviewPanel(info: MediaInfo, state: HomeState, a: HomeActions, onDo
         } else {
             Section(footer = "Direct file — fetched with parallel connections by aria2c.") {
                 Cell("Download file", icon = Icons.Rounded.InsertDriveFile, iconColor = c.blue)
+            }
+        }
+        state.existing?.let { ex ->
+            Gap(16.dp)
+            Row(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(c.green.copy(alpha = 0.12f)).padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Check, null, tint = c.green, modifier = Modifier.size(18.dp))
+                HGap(10.dp)
+                Column(Modifier.weight(1f)) {
+                    Text("Already in your Library", style = TextStyles.subhead.copy(fontWeight = FontWeight.SemiBold), color = c.label)
+                    Text(listOf(ex.quality.short, fmtBytes(ex.sizeBytes)).filter { it.isNotEmpty() }.joinToString(" · "),
+                        style = TextStyles.footnote, color = c.secondary)
+                }
+                TextAction("Open", { a.onOpenExisting(ex) })
             }
         }
         Gap(20.dp)

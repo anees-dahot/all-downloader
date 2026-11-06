@@ -1,4 +1,11 @@
 <resources>
     <string name="app_name">All Downloader</string>
     <string name="share_label">Download</string>
+    <string name="sc_paste">Paste &amp; Grab</string>
+    <string name="sc_paste_long">Grab copied link</string>
+    <string name="sc_queue">Queue</string>
+    <string name="sc_queue_long">Open download queue</string>
+    <string name="sc_library">Library</string>
+    <string name="sc_library_long">Open library</string>
+    <string name="tile_label">Grab Link</string>
 </resources>

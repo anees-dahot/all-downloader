@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="paste" android:enabled="true" android:icon="@drawable/ic_sc_paste"
+        android:shortcutShortLabel="@string/sc_paste" android:shortcutLongLabel="@string/sc_paste_long">
+        <intent android:action="com.anees.alldownloader.action.PASTE" android:targetPackage="com.anees.alldownloader"
+            android:targetClass="com.anees.alldownloader.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="queue" android:enabled="true" android:icon="@drawable/ic_sc_queue"
+        android:shortcutShortLabel="@string/sc_queue" android:shortcutLongLabel="@string/sc_queue_long">
+        <intent android:action="com.anees.alldownloader.action.QUEUE" android:targetPackage="com.anees.alldownloader"
+            android:targetClass="com.anees.alldownloader.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="library" android:enabled="true" android:icon="@drawable/ic_sc_library"
+        android:shortcutShortLabel="@string/sc_library" android:shortcutLongLabel="@string/sc_library_long">
+        <intent android:action="com.anees.alldownloader.action.LIBRARY" android:targetPackage="com.anees.alldownloader"
+            android:targetClass="com.anees.alldownloader.MainActivity" />
+    </shortcut>
+</shortcuts>

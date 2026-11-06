@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     private var tab by mutableIntStateOf(0)
     private var lastClipStamp = 0L
+    /** Set by the Paste & Grab shortcut / tile: the clipboard is only readable once we have focus. */
+    private var pasteOnFocus = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -100,8 +102,15 @@ class MainActivity : ComponentActivity() {
     /** Android 10+ only lets the focused app read the clipboard. */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus || !Settings.current.clipboardDetect) return
+        if (!hasFocus) return
         val cm = getSystemService(ClipboardManager::class.java) ?: return
+        if (pasteOnFocus) {
+            pasteOnFocus = false
+            val text = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull()
+            if (text.isNullOrBlank()) vm.toast("Clipboard is empty — copy a link first") else vm.onShared(text)
+            return
+        }
+        if (!Settings.current.clipboardDetect) return
         val desc = cm.primaryClipDescription ?: return
         if (!desc.hasMimeType("text/*")) return
         // Only read new clips: each read shows Android's "pasted" toast.
@@ -126,6 +135,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        when (intent.action) {
+            ACTION_PASTE -> { tab = 0; pasteOnFocus = true; return }
+            ACTION_QUEUE -> { tab = 1; return }
+            ACTION_LIBRARY -> { tab = 2; return }
+        }
         when {
             intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { vm.onShared(it); tab = 0 }
             intent.hasExtra(EXTRA_URL) -> { vm.onShared(intent.getStringExtra(EXTRA_URL)!!); tab = 0 }
@@ -186,7 +200,7 @@ class MainActivity : ComponentActivity() {
                             HomeActions(
                                 vm::setUrl, { vm.onShared(it, autoFetch = true) }, { vm.fetch() }, vm::clearHome, vm::setQuality,
                                 { vm.enqueue(); tab = 1 }, vm::toggleEntry, vm::selectAll, vm::fetchSingle, vm::setClip,
-                                { vm.enqueueBatch(); tab = 1 }, vm::useClip, vm::dismissClip,
+                                { vm.enqueueBatch(); tab = 1 }, vm::useClip, vm::dismissClip, vm::open,
                             ), m,
                         )
                         1 -> DownloadsScreen(
@@ -232,5 +246,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_TAB = "tab"
         const val EXTRA_URL = "url"
         const val EXTRA_RETRY = "retry"
+        const val ACTION_PASTE = "com.anees.alldownloader.action.PASTE"
+        const val ACTION_QUEUE = "com.anees.alldownloader.action.QUEUE"
+        const val ACTION_LIBRARY = "com.anees.alldownloader.action.LIBRARY"
     }
 }

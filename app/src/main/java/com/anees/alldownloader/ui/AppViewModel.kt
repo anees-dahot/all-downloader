@@ -60,6 +60,8 @@ data class HomeState(
     val clipOn: Boolean = false,
     val clipStart: Int = 0,
     val clipEnd: Int = 0,
+    /** Same link already saved in the library (shown as a gentle heads-up, never a block). */
+    val existing: DownloadRecord? = null,
 )
 
 data class ActiveItem(
@@ -207,7 +209,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             info.heights.any { it == s.quality.height } -> s.quality
                             else -> Quality.BEST
                         }
-                        s.copy(loading = false, info = info, quality = q, selected = info.entries.map { it.id }.toSet(),
+                        val existing = if (info.isPlaylist) null else HistoryStore.items.value
+                            .firstOrNull { it.status == Status.DONE && (it.url == info.url || it.url == url) }
+                        s.copy(loading = false, info = info, quality = q, existing = existing, selected = info.entries.map { it.id }.toSet(),
                             clipOn = false, clipStart = 0, clipEnd = info.durationSec)
                     }
                 }
