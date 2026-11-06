@@ -44,6 +44,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import com.anees.alldownloader.ui.components.fmtBytes
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,6 +93,8 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onUpdateEngine: () -> Unit,
     onCheckUpdate: () -> Unit,
+    cacheBytes: () -> Long,
+    onClearCache: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val c = AppTheme.c
@@ -134,6 +139,16 @@ fun SettingsScreen(
                 Choice("At Once", Icons.Rounded.Layers, c.teal, "${s.parallel}", listOf("1 at a time", "2 at a time", "3 at a time", "4 at a time")) { i -> onChange { it.copy(parallel = i + 1) } }
                 Separator(SEP)
                 Toggle("Auto-Retry", Icons.Rounded.Replay, c.green, s.autoRetry) { v -> onChange { it.copy(autoRetry = v) } }
+                Separator(SEP)
+                // Re-measured whenever the tab is shown or after clearing.
+                var cache by remember { mutableStateOf<Long?>(null) }
+                var tick by remember { mutableStateOf(0) }
+                LaunchedEffect(tick) { if (tick > 0) kotlinx.coroutines.delay(500); cache = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cacheBytes() } }
+                Cell(
+                    "Clear Partial Files", icon = Icons.Rounded.Delete, iconColor = c.red,
+                    value = cache?.let { if (it == 0L) "Empty" else fmtBytes(it) },
+                    onClick = if ((cache ?: 0L) > 0L) ({ onClearCache(); tick++ }) else null,
+                )
                 Separator(SEP)
                 Toggle("aria2c for Files", Icons.Rounded.Memory, c.gray, s.aria2) { v -> onChange { it.copy(aria2 = v) } }
             }

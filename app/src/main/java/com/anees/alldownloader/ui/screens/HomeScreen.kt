@@ -357,8 +357,10 @@ private fun PreviewPanel(info: MediaInfo, state: HomeState, a: HomeActions, onDo
                 .clip(RoundedCornerShape(18.dp)).background(c.card),
         ) {
             Box(Modifier.fillMaxWidth().aspectRatio(16 / 9f).background(c.fill), contentAlignment = Alignment.Center) {
-                Icon(if (info.isDirect) Icons.Rounded.InsertDriveFile else Icons.Rounded.Movie, null, tint = c.secondary, modifier = Modifier.size(36.dp))
-                if (info.thumbnail != null) AsyncImage(info.thumbnail, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+                if (info.thumbnail == null) Icon(if (info.isDirect) Icons.Rounded.InsertDriveFile else Icons.Rounded.Movie, null, tint = c.secondary, modifier = Modifier.size(36.dp))
+                // Direct images are shown whole; video artwork fills the frame.
+                else AsyncImage(info.thumbnail, null, Modifier.matchParentSize().padding(if (info.isDirect) 12.dp else 0.dp),
+                    contentScale = if (info.isDirect) ContentScale.Fit else ContentScale.Crop)
                 if (info.durationSec > 0) Text(
                     fmtDuration(info.durationSec), style = TextStyles.numeric.copy(fontSize = TextStyles.caption.fontSize), color = Color.White,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(6.dp))

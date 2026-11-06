@@ -94,6 +94,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val w = byRec[r.id]
             // Process may have died mid-download; trust WorkManager over our record.
             val st = when {
+                // Just enqueued: WorkManager's flow hasn't caught up yet, so don't flash "Interrupted".
+                r.status.isActive && w == null && System.currentTimeMillis() - (justStarted[r.id] ?: 0L) < 10_000 -> r.status
                 r.status.isActive && w == null -> Status.FAILED
                 r.status.isActive && w!!.state == WorkInfo.State.FAILED -> Status.FAILED
                 r.status.isActive && w!!.state == WorkInfo.State.CANCELLED -> Status.CANCELLED
@@ -118,6 +120,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }.filter { it.rec.status != Status.CANCELLED }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val justStarted = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private val _filter = MutableStateFlow(LibraryFilter())
     val filter = _filter.asStateFlow()
     private val _missing = MutableStateFlow<Set<String>>(emptySet())
@@ -126,7 +130,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val library: StateFlow<List<DownloadRecord>> = combine(HistoryStore.items, _filter) { recs, f ->
         recs.asSequence().filter { it.status == Status.DONE }
             .filter { f.kind == null || it.kind == f.kind }
-            .filter { f.query.isBlank() || it.title.contains(f.query, true) || it.site.contains(f.query, true) || (it.uploader?.contains(f.query, true) == true) }
+            .filter { f.query.isBlank() || it.title.contains(f.query, true) || it.site.contains(f.query, true) || (it.outName?.contains(f.query, true) == true) || (it.uploader?.contains(f.query, true) == true) }
             .let { seq ->
                 when (f.sort) {
                     LibrarySort.NEWEST -> seq.sortedByDescending { it.finishedAt }
@@ -174,7 +178,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun fetch(allowPlaylist: Boolean = true) {
-        val url = _home.value.url.trim()
+        var url = _home.value.url.trim()
+        // "youtube.com/watch?v=…" without a scheme is still clearly a link.
+        if (!url.contains("://") && BARE_DOMAIN_RE.containsMatchIn(url) && !url.contains(' ')) {
+            url = "https://$url"; _home.update { it.copy(url = url) }
+        }
         if (!URL_RE.matches(url)) {
             _home.update { it.copy(error = "That doesn't look like a link. It should start with http:// or https://") }
             return
@@ -254,6 +262,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun start(rec: DownloadRecord, isDirect: Boolean) {
+        justStarted[rec.id] = System.currentTimeMillis()
         HistoryStore.upsert(rec)
         val net = if (Settings.current.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
         val req = OneTimeWorkRequestBuilder<DownloadWorker>()
@@ -280,6 +289,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun cancel(rec: DownloadRecord) {
         wm.cancelAllWorkByTag(TAG_REC + rec.id)
         HistoryStore.modify(rec.id) { it.copy(status = Status.CANCELLED) }
+        // Paused or not-yet-started jobs have no worker left to clean their partial files.
+        dropPartials(rec.id)
+    }
+
+    private fun dropPartials(id: String) = viewModelScope.launch(Dispatchers.IO) {
+        java.io.File(ctx.cacheDir, "dl/$id").deleteRecursively()
     }
 
     fun pause(rec: DownloadRecord) {
@@ -303,8 +318,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         start(rec.copy(status = Status.QUEUED, error = null, createdAt = System.currentTimeMillis()), isDirectRec(rec))
     }
 
-    fun dismiss(rec: DownloadRecord) = HistoryStore.remove(listOf(rec.id))
-    fun clearFailed() = HistoryStore.remove(active.value.filter { it.rec.status == Status.FAILED }.map { it.rec.id })
+    fun dismiss(rec: DownloadRecord) { HistoryStore.remove(listOf(rec.id)); dropPartials(rec.id) }
+    fun clearFailed() = active.value.filter { it.rec.status == Status.FAILED }.forEach { dismiss(it.rec) }
 
     fun redownload(rec: DownloadRecord) {
         start(rec.copy(id = UUID.randomUUID().toString(), status = Status.QUEUED, createdAt = System.currentTimeMillis(),
@@ -319,6 +334,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshMissing() = viewModelScope.launch(Dispatchers.IO) {
         _missing.value = HistoryStore.items.value.filter { it.status == Status.DONE && it.outUri != null }
             .filterNot { Storage.exists(ctx, it.outUri!!) }.map { it.id }.toSet()
+    }
+
+    /** Drop library entries whose file was deleted outside the app. */
+    fun removeMissing() {
+        val ids = _missing.value
+        if (ids.isEmpty()) return
+        HistoryStore.remove(ids)
+        _missing.value = emptySet()
+        _messages.tryEmit("Removed ${ids.size} missing ${if (ids.size == 1) "file" else "files"}")
+    }
+
+    fun openSource(rec: DownloadRecord) {
+        runCatching {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(rec.url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { _messages.tryEmit("No browser to open the link") }
     }
 
     fun open(rec: DownloadRecord) {
@@ -373,7 +404,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun useClip() { val u = _clipOffer.value ?: return; dismissClip(); onShared(u) }
 
     // ---------- Settings / engine / updates ----------
-    fun updateEngine() = viewModelScope.launch { _messages.emit(Engine.update()) }
+    fun updateEngine() = viewModelScope.launch {
+        // Engine.update() rethrows the init failure when the engine never started.
+        _messages.emit(runCatching { Engine.update() }.getOrElse { "Engine isn't running: ${it.message ?: "init failed"}. Restart the app." })
+    }
+
+    /** Partial files left by paused or abandoned downloads. */
+    fun cacheBytes(): Long = java.io.File(ctx.cacheDir, "dl").walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+
+    fun clearCache() = viewModelScope.launch(Dispatchers.IO) {
+        val keep = HistoryStore.items.value.filter { it.status.isActive || it.status == Status.PAUSED }.map { it.id }.toSet()
+        java.io.File(ctx.cacheDir, "dl").listFiles().orEmpty().filter { it.name !in keep }.forEach { it.deleteRecursively() }
+        java.io.File(ctx.cacheDir, "update").deleteRecursively()
+        _messages.emit("Cache cleared")
+    }
     fun checkAppUpdate() = viewModelScope.launch { AppUpdater.check(manual = true) }
     fun downloadUpdate(rel: Release) {
         AppUpdater.downloadJob?.cancel()
@@ -391,6 +435,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG_REC = "rec:"
         val URL_RE = Regex("""https?://[^\s]+""")
+        private val BARE_DOMAIN_RE = Regex("""^[\w-]+(\.[\w-]+)+(/|$)""")
         private val FILE_RE = Regex("""\.(zip|apk|pdf|rar|7z|exe|dmg|iso|tar|gz|mp4|mkv|mp3|m4a|flac|jpg|png)(\?|$)""", RegexOption.IGNORE_CASE)
     }
 }

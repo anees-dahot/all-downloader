@@ -195,9 +195,11 @@ class MainActivity : ComponentActivity() {
                             LibraryActions(
                                 vm::setQuery, vm::setKind, vm::setSort, vm::open, vm::shareMany,
                                 { vm.redownload(it); tab = 1 }, { r, del -> vm.removeMany(r, del) }, { vm.refreshMissing() }, { vm.toast("Link copied") },
+                                vm::removeMissing, vm::openSource,
                             ), m,
                         )
-                        else -> SettingsScreen(settings, engine, update, Settings::update, { vm.updateEngine() }, { vm.checkAppUpdate() }, m)
+                        else -> SettingsScreen(settings, engine, update, Settings::update, { vm.updateEngine() }, { vm.checkAppUpdate() },
+                            vm::cacheBytes, { vm.clearCache() }, m)
                     }
                 }
             }

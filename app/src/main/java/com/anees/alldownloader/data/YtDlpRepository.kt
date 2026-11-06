@@ -8,6 +8,7 @@ import java.io.File
 
 object YtDlpRepository {
 
+    private val IMAGE_RE = Regex("""\.(jpe?g|png|webp|gif|avif)(\?|$)""", RegexOption.IGNORE_CASE)
     private val PLAYLIST_HINT = Regex("""[?&]list=|/playlist|/sets/|/album/|/@[^/]+/?(videos|shorts|streams)?/?$|/channel/|/c/""", RegexOption.IGNORE_CASE)
 
     suspend fun fetchInfo(url: String, allowPlaylist: Boolean = true): MediaInfo = withContext(Dispatchers.IO) {
@@ -39,7 +40,8 @@ object YtDlpRepository {
         MediaInfo(
             url = url,
             title = info.title ?: info.fulltitle ?: url.substringAfterLast('/'),
-            thumbnail = info.thumbnail,
+            // Direct image links have no thumbnail of their own; the image is its own preview.
+            thumbnail = info.thumbnail ?: url.takeIf { IMAGE_RE.containsMatchIn(it) },
             uploader = info.uploader,
             durationSec = info.duration,
             site = extractor,

@@ -20,12 +20,12 @@ import java.io.File
 object Storage {
     const val FOLDER = "AllDownloader"
 
-    fun publish(ctx: Context, file: File): Pair<String, Long> {
-        val mime = mimeOf(file.name)
+    fun publish(ctx: Context, file: File, displayName: String = file.name): Pair<String, Long> {
+        val mime = mimeOf(displayName)
         return if (Build.VERSION.SDK_INT >= 29) {
             val resolver = ctx.contentResolver
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, file.name)
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
                 put(MediaStore.Downloads.MIME_TYPE, mime)
                 put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
                 put(MediaStore.Downloads.IS_PENDING, 1)
@@ -43,7 +43,7 @@ object Storage {
             @Suppress("DEPRECATION")
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), FOLDER)
             dir.mkdirs()
-            val dest = uniqueFile(dir, file.name)
+            val dest = uniqueFile(dir, displayName)
             if (!file.renameTo(dest)) file.copyTo(dest, overwrite = false)
             MediaScannerConnection.scanFile(ctx, arrayOf(dest.absolutePath), arrayOf(mime), null)
             Uri.fromFile(dest).toString() to dest.length()

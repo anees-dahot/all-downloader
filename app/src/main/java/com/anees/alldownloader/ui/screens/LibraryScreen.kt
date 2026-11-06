@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
@@ -96,6 +97,8 @@ class LibraryActions(
     val onRemove: (List<DownloadRecord>, Boolean) -> Unit,
     val onRefresh: () -> Unit,
     val onCopied: () -> Unit,
+    val onRemoveMissing: () -> Unit,
+    val onOpenSource: (DownloadRecord) -> Unit,
 )
 
 @Composable
@@ -150,6 +153,22 @@ fun LibraryScreen(
                     Segmented(listOf("All", "Video", "Audio", "Files"), kinds.indexOf(filter.kind), { a.onKind(kinds[it]) }, Modifier.fillMaxWidth())
                     Gap(16.dp)
                     StorageBar(all)
+                    if (missing.isNotEmpty()) {
+                        Gap(10.dp)
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.orange.copy(alpha = 0.12f))
+                                .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Warning, null, tint = c.orange, modifier = Modifier.size(18.dp))
+                            HGap(10.dp)
+                            Text(
+                                "${missing.size} ${if (missing.size == 1) "file was" else "files were"} moved or deleted",
+                                style = TextStyles.footnote, color = c.label, modifier = Modifier.weight(1f),
+                            )
+                            TextAction("Clean Up", { h.tap(); a.onRemoveMissing() })
+                        }
+                    }
                     Gap(18.dp)
                 }
             }
@@ -299,6 +318,7 @@ private fun LibraryRow(
         DropdownMenu(menu, { menu = false }, shape = RoundedCornerShape(14.dp), containerColor = c.card) {
             DropdownMenuItem({ Text("Share") }, { menu = false; a.onShare(listOf(rec)) }, trailingIcon = { Icon(Icons.Rounded.Share, null) }, enabled = !missing)
             DropdownMenuItem({ Text("Copy Source Link") }, { menu = false; clip.setText(AnnotatedString(rec.url)); a.onCopied() }, trailingIcon = { Icon(Icons.Rounded.ContentCopy, null) })
+            DropdownMenuItem({ Text("Open Source Page") }, { menu = false; a.onOpenSource(rec) }, trailingIcon = { Icon(Icons.Rounded.Language, null) })
             DropdownMenuItem({ Text("Download Again") }, { menu = false; a.onRedownload(rec) }, trailingIcon = { Icon(Icons.Rounded.Download, null) })
             DropdownMenuItem({ Text("Select") }, { menu = false; onSelectStart() }, trailingIcon = { Icon(androidx.compose.material.icons.Icons.Rounded.CheckCircle, null) })
             DropdownMenuItem({ Text("Delete…", color = c.red) }, { menu = false; onDelete() }, trailingIcon = { Icon(Icons.Rounded.Delete, null, tint = c.red) })

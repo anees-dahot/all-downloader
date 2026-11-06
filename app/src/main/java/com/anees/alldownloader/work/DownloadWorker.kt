@@ -33,7 +33,9 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
     private val recId = inputData.getString(KEY_REC_ID) ?: id.toString()
     private val notifId = recId.hashCode()
-    private val title = inputData.getString(KEY_TITLE) ?: "Download"
+    private val inputTitle = inputData.getString(KEY_TITLE) ?: "Download"
+    /** Quick-started jobs begin titled with their URL; prefer the real title once known. */
+    private val title get() = HistoryStore.get(recId)?.title?.takeIf { !it.startsWith("http") } ?: inputTitle
     private var lastPushMs = 0L
 
     override suspend fun doWork(): Result {
@@ -65,15 +67,18 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             setProgress(progressData(100f, "Saving…", null, null))
             val (name, saved) = withContext(Dispatchers.IO) {
-                val main = tmp.listFiles().orEmpty().filter {
-                    it.isFile && it.extension.lowercase() !in setOf("part", "ytdl", "vtt", "srt", "webp", "jpg", "png", "json")
-                        && !it.name.contains(".part-Frag")
-                }.maxByOrNull { it.length() } ?: error("No output file produced")
-                main.name to Storage.publish(applicationContext, main)
+                val files = tmp.listFiles().orEmpty().filter {
+                    it.isFile && it.extension.lowercase() !in setOf("part", "ytdl", "temp", "aria2") && !it.name.contains(".part-Frag")
+                }
+                // Prefer real media; side files (subs, cover art) only count when nothing else exists (e.g. a direct image link).
+                val main = files.filter { it.extension.lowercase() !in SIDE_EXT }.maxByOrNull { it.length() }
+                    ?: files.maxByOrNull { it.length() } ?: error("No output file produced")
+                val clean = cleanName(main.name)
+                clean to Storage.publish(applicationContext, main, clean)
             }
             HistoryStore.modify(recId) {
                 it.copy(
-                    title = if (it.title == it.url) name.substringBeforeLast('.').replace(Regex(" \\[[^]]+]$"), "") else it.title,
+                    title = if (it.title == it.url) name.substringBeforeLast('.') else it.title,
                     status = Status.DONE, finishedAt = System.currentTimeMillis(), error = null,
                     outUri = saved.first, outName = name, mime = Storage.mimeOf(name), sizeBytes = saved.second,
                 )
@@ -112,7 +117,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
     private fun onProgress(p: Float, eta: Long, line: String) {
         if (line.startsWith("[download] Destination:")) {
-            val name = line.substringAfterLast('/').substringBeforeLast('.').replace(Regex(" \\[[^]]+]$"), "")
+            val name = cleanName(line.substringAfterLast('/')).substringBeforeLast('.')
             if (name.isNotBlank()) HistoryStore.get(recId)?.takeIf { it.title == it.url }?.let { HistoryStore.modify(recId) { r -> r.copy(title = name) } }
         }
         val now = System.currentTimeMillis()
@@ -136,9 +141,9 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
     private fun fmtEta(s: Long) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
 
-    private fun contentIntent(): PendingIntent = PendingIntent.getActivity(
-        applicationContext, 0,
-        Intent(applicationContext, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, 1)
+    private fun contentIntent(tab: Int = 1): PendingIntent = PendingIntent.getActivity(
+        applicationContext, tab,
+        Intent(applicationContext, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, tab)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -160,12 +165,19 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     }
 
     private fun notifyDone(ok: Boolean, text: String) {
+        val rec = HistoryStore.get(recId)
+        val open = if (ok && rec?.outUri != null) runCatching {
+            PendingIntent.getActivity(
+                applicationContext, notifId, Storage.openIntent(applicationContext, rec.outUri, rec.mime),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }.getOrNull() else null
         val n = NotificationCompat.Builder(applicationContext, App.CHANNEL_DONE)
             .setSmallIcon(R.drawable.ic_download_glyph)
             .setContentTitle(if (ok) "Saved · $title" else "Failed · $title")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(contentIntent())
+            .setContentIntent(open ?: contentIntent(if (ok) 2 else 1))
             .setAutoCancel(true)
             .build()
         val nm = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -189,6 +201,14 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         const val KEY_SPEED = "speed"
         const val KEY_TOTAL = "total"
         const val KEY_ERROR = "error"
+        private val SIDE_EXT = setOf("vtt", "srt", "ass", "webp", "jpg", "jpeg", "png", "json", "description")
+        private val ID_SUFFIX = Regex(" \\[[^\\]]+]$")
+        /** "Title [abc123].mp4" -> "Title.mp4": the id only keeps temp names unique. */
+        fun cleanName(name: String): String {
+            val ext = name.substringAfterLast('.', "")
+            val base = name.substringBeforeLast('.').replace(ID_SUFFIX, "").trim().ifEmpty { "download" }
+            return if (ext.isEmpty()) base else "$base.$ext"
+        }
         private val PROGRESS_RE = Regex("""of\s+~?\s*([\d.]+\s*\w+)(?:\s+in\s+\S+)?\s+at\s+([\d.]+\s*\w+/s)""")
     }
 }
